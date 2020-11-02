@@ -1,8 +1,11 @@
 from google.cloud import speech
-import io, os
-from utils import AudioFile
+import io, os, json
+from audiofile import AudioFile
 from tqdm import tqdm
 import datetime
+import warnings
+
+warnings.filterwarnings('ignore')
 
 DIR = r"C:\Users\Dell\Desktop\speech"
 
@@ -28,35 +31,49 @@ def transcribe_gcs(gcs_uri, duration):
 
     print("Waiting for operation to complete...")
     response = operation.result(timeout=duration + 100)
+    
 
     # Each result is for a consecutive portion of the audio. Iterate through
     # them to get the transcripts for the entire audio file. 
     transcript = ""
     chunk_timestamps = []
+    srt_idx = 1
 
     for result in response.results: 
         # The first alternative is the most likely one for this portion. It is the only one containing word offsets
         alternative = result.alternatives[0]
         # using \n\n as a delimiter when adding the timestamps
-        transcript += (alternative.transcript + "\n\n") 
+        transcript += (alternative.transcript.strip() + "\n\n") 
+
+        start_time = alternative.words[0].start_time
+        end_time = alternative.words[-1].end_time
+        
+        # get the ns part in time, convert to ms and append it to fit the srt format
+        start_ms = int(str(start_time.total_seconds()).split('.')[-1]) * 100
+        end_ms = int(str(end_time.total_seconds()).split('.')[-1]) * 100
 
         # we get the start and end time of the first and last word respectively in chunk, in hh:mm:ss format 
-        start_time = str(datetime.timedelta(seconds=alternative.words[0].start_time.seconds)) 
-        end_time = str(datetime.timedelta(seconds=alternative.words[-1].end_time.seconds))
-        time_for_chunk = f"{start_time}s --- {end_time}s" 
+        start_time = str(start_time).split('.')[0]
+        end_time = str(end_time).split('.')[0]
+
+
+        time_for_chunk = f"{srt_idx}\n{start_time},{start_ms}s ---> {end_time},{end_ms}s\n" # this is the srt format we need
 
         # for each chunk we append its timestamp so we can add it later
         chunk_timestamps.append(time_for_chunk) 
+        srt_idx += 1
 
     # get the basename of the file so each transript.txt file is unique when generated
     audio_fname = os.path.basename(gcs_uri).strip(".wav")
  
     # modify transcript to include the timestamp at the start of each chunk of transcription.
-    transcript = "\n\n".join([f"{x}\n"  + y for (x, y) in zip(chunk_timestamps, transcript.split("\n\n"))]) # here we add timestamps to each chunk of speech
+    transcript = "\n\n".join([f"{x}"  + y for (x, y) in zip(chunk_timestamps, transcript.split("\n\n"))]) # here we add timestamps to each chunk of speech
 
     # write the stream of chunk to a txt file once the whole audio is transcribed.
     with open(f"transcript_test_{audio_fname}.txt", "w") as f:
-        f.write(transcript)   
+        f.write(transcript) 
+
+    print("Transcripted the audio")      
 
 if __name__ == "__main__":
 
@@ -64,8 +81,8 @@ if __name__ == "__main__":
     file_path = "../testing/trimmed.wav"
 
     audio = AudioFile(file_path)
-    audio.stereo_to_mono(file_path) # convert channels to 1 IF needed
-    duration = audio.get_duration(file_path) # get the audio file duration to dynamically set the timeout time of client
+    audio.stereo_to_mono()
+    duration = audio.get_duration()
 
     # this is the uri of the bucket in GCS
     gcs_uri = "gs://audiofiles_bucket/trimmed.wav"

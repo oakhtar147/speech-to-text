@@ -3,6 +3,9 @@ import contextlib
 from pydub import AudioSegment
 import os
 import PyWave as pw
+import warnings
+
+warnings.filterwarnings('ignore')
 
 DIR = r"C:\Users\Dell\Desktop\speech"
 
